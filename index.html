@@ -10,26 +10,41 @@
     display: flex; align-items: center; justify-content: center;
     overflow: hidden; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   }
+  #wrap { position: relative; }
   canvas {
     aspect-ratio: 2 / 3;
     height: min(96vh, 150vw);
     border-radius: 12px;
     box-shadow: 0 0 60px rgba(80, 120, 255, .25);
     touch-action: none; user-select: none; -webkit-user-select: none;
+    display: block;
   }
+  #langBtn {
+    position: absolute; top: 10px; right: 10px; z-index: 2;
+    padding: 6px 14px; border-radius: 999px;
+    border: 1px solid rgba(255,255,255,.25);
+    background: rgba(10,15,35,.65); color: #fff;
+    font-size: 14px; font-weight: 600; cursor: pointer;
+    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
+  }
+  #langBtn:active { transform: scale(.94); }
 </style>
 </head>
 <body>
-<canvas id="game"></canvas>
+<div id="wrap">
+  <canvas id="game"></canvas>
+  <button id="langBtn">EN</button>
+</div>
 <script>
 'use strict';
 /* ============================================================================
-   游戏开发第 1 课：打砖块 v0.2
+   游戏开发第 1 课：打砖块 v0.3
    v0.1 练：概念 1 游戏主循环 Game Loop ／ 概念 2 碰撞检测 Collision
-   v0.2 新增：
-     概念 3 —— 掉落物系统：砖块按概率掉道具（多球/加长/火球），接住生效、限时消失
-     概念 4 —— 粒子系统：砖块碎裂的粒子爆炸，一个数组管所有粒子，通用于任何游戏
-     概念 5 —— 游戏手感 juice：拖尾、屏幕震动、连击倍率——"好玩"大多是这些细节堆出来的
+   v0.2 练：概念 3 掉落物系统 ／ 概念 4 粒子系统 ／ 概念 5 游戏手感 juice
+   v0.3 新增：
+     - 中/EN 双语切换：所有界面文字收进 T 字典，右上角按钮一键切换，偏好存 localStorage
+     - 双枪道具：挡板两头长炮管，自动向上开火——新概念 6：子弹系统
+       （生成 → 移动 → 碰撞 → 回收，跟粒子系统一样，是放哪款游戏都通用的技术）
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
 
@@ -39,6 +54,51 @@ const ctx = canvas.getContext('2d');
 canvas.width = W; canvas.height = H;
 
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+/* ---------- 双语字典：界面所有文字都在这里，一处改、处处生效 ---------- */
+const T = {
+  zh: {
+    title: '打砖块', lesson: '游戏开发第 1 课',
+    level: n => `第 ${n} 关`,
+    tapLaunch: '点击 / 空格 发球',
+    controls: '鼠标移动 · 手指拖动 · ← → 键',
+    score: '分数', best: '最佳',
+    combo: (n, m) => `连击 ${n}  ×${m}`,
+    gameOver: '游戏结束',
+    finalScore: (s, b) => `得分 ${s}　最佳 ${b}`,
+    playAgain: '点击 / 空格 再来一局',
+    powWide: '加长', powPierce: '火球', powGuns: '双枪',
+    fxWide: '▬', fxPierce: '🔥', fxGuns: '双枪',
+  },
+  en: {
+    title: 'Breakout', lesson: 'Game Dev Lesson 1',
+    level: n => `Level ${n}`,
+    tapLaunch: 'Tap / Space to launch',
+    controls: 'Mouse · touch drag · ← → keys',
+    score: 'Score', best: 'Best',
+    combo: (n, m) => `Combo ${n} ×${m}`,
+    gameOver: 'Game Over',
+    finalScore: (s, b) => `Score ${s}  Best ${b}`,
+    playAgain: 'Tap / Space to play again',
+    powWide: 'WIDE', powPierce: 'FIRE', powGuns: 'GUNS',
+    fxWide: '▬', fxPierce: '🔥', fxGuns: 'GUNS',
+  },
+};
+let lang = localStorage.getItem('breakout-lang') || 'zh';
+const t = () => T[lang];
+const langBtn = document.getElementById('langBtn');
+function applyLang() {
+  document.title = `${t().title} · ${t().lesson}`;
+  langBtn.textContent = lang === 'zh' ? 'EN' : '中文';
+  localStorage.setItem('breakout-lang', lang);
+}
+langBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  lang = lang === 'zh' ? 'en' : 'zh';
+  applyLang();
+  beep(660, .06);
+});
+applyLang();
 
 /* ---------- 音效：WebAudio 现场合成 ---------- */
 let actx = null;
@@ -56,17 +116,17 @@ function beep(freq, dur = 0.07, type = 'square', vol = 0.12) {
 function powerSound() { beep(523, .08); setTimeout(() => beep(659, .08), 80); setTimeout(() => beep(784, .12), 160); }
 
 /* ---------- 游戏状态 ---------- */
-let state = 'ready';            // ready | playing | gameover（过关直接进下一关，不另设状态）
+let state = 'ready';
 let score = 0, lives = 3, level = 1;
-let combo = 0;                  // 连击：连续消砖数，丢球清零
+let combo = 0;
 let best = +(localStorage.getItem('breakout-best') || 0);
-const comboMult = () => Math.min(5, 1 + Math.floor(combo / 10));  // 每10连击+1倍，上限×5
+const comboMult = () => Math.min(5, 1 + Math.floor(combo / 10));
 
 /* ---------- 挡板 ---------- */
-const paddle = { w: 96, h: 14, x: W / 2 - 48, y: H - 70, speed: 560, wideT: 0 };
-const paddleW = () => paddle.wideT > 0 ? paddle.w * 1.5 : paddle.w;  // 加长道具生效中？
+const paddle = { w: 96, h: 14, x: W / 2 - 48, y: H - 70, speed: 560, wideT: 0, gunsT: 0 };
+const paddleW = () => paddle.wideT > 0 ? paddle.w * 1.5 : paddle.w;
 
-/* ---------- 小球（v0.2 起支持多球，所以用数组） ---------- */
+/* ---------- 小球（数组，支持多球） ---------- */
 const BASE_SPEED = 440;
 let balls = [];
 function makeBall(x, y, vx, vy) {
@@ -106,28 +166,26 @@ function buildBricks() {
       });
 }
 
-/* ============================================================================
-   概念 3：掉落物系统
-   数据：POWERS 描述每种道具（颜色/文字/持续时间/生效函数）
-   流程：砖块碎了 → 按概率生成掉落物 → 掉落物下落 → 挡板接住→生效 / 掉出屏幕→消失
-   ========================================================================== */
+/* ---------- 概念 3：掉落物系统 ---------- */
 const POWERS = {
-  multi:  { color: '#22d3ee', label: '×3',   dur: 0,  desc: '多球' },
-  wide:   { color: '#2ed573', label: '加长', dur: 12, desc: '加长挡板' },
-  pierce: { color: '#ff9f43', label: '火球', dur: 10, desc: '穿透火球' },
+  multi:  { color: '#22d3ee', dur: 0 },
+  wide:   { color: '#2ed573', dur: 12 },
+  pierce: { color: '#ff9f43', dur: 10 },
+  guns:   { color: '#a55eea', dur: 10 },
 };
-let powerups = [];   // {x, y, vy, type}
+const POWER_LABEL = p =>
+  p === 'multi' ? '×3' : { wide: t().powWide, pierce: t().powPierce, guns: t().powGuns }[p];
+let powerups = [];
 function maybeDropPower(x, y) {
-  if (Math.random() > 0.22) return;                       // 22% 掉率
+  if (Math.random() > 0.22) return;
   const r = Math.random();
-  const type = r < 0.35 ? 'multi' : r < 0.7 ? 'wide' : 'pierce';
+  const type = r < 0.30 ? 'multi' : r < 0.60 ? 'wide' : r < 0.85 ? 'pierce' : 'guns';
   powerups.push({ x, y, vy: 150, type, w: 52, h: 28 });
 }
 function applyPower(type) {
   powerSound();
   burst(paddle.x + paddleW() / 2, paddle.y, POWERS[type].color, 14);
   if (type === 'multi') {
-    // 每个现有球分裂出 2 个，速度方向转 ±25°，总数上限 12
     const src = balls.slice();
     for (const b of src) {
       if (balls.length >= 12) break;
@@ -142,16 +200,21 @@ function applyPower(type) {
   } else if (type === 'wide') {
     paddle.wideT = POWERS.wide.dur;
   } else if (type === 'pierce') {
-    for (const b of balls) b.pierceT = POWERS.pierce.dur;  // 火球：穿砖不反弹
+    for (const b of balls) b.pierceT = POWERS.pierce.dur;
+  } else if (type === 'guns') {
+    paddle.gunsT = POWERS.guns.dur;
+    fireT = GUN_INTERVAL;   // 捡到立刻开第一枪，反馈爽快
   }
 }
 
-/* ============================================================================
-   概念 4：粒子系统
-   一个数组管所有粒子：每帧按速度移动、减速、减命；画的时候按剩余寿命算透明度。
-   这套代码搬到任何游戏里都能用，是游戏开发最通用的"胶水"技术之一。
-   ========================================================================== */
-let particles = [];  // {x, y, vx, vy, life, maxLife, color, size}
+/* ---------- 概念 6：子弹系统（双枪道具） ----------
+   跟粒子系统一个思路：数组存所有子弹，每帧移动 → 碰砖 → 消砖/消失 → 飞出屏幕回收 */
+let bullets = [];   // {x, y, vy}
+const GUN_INTERVAL = 0.25;
+let fireT = 0;
+
+/* ---------- 概念 4：粒子系统 ---------- */
+let particles = [];
 function burst(x, y, color, n = 10) {
   for (let i = 0; i < n; i++) {
     const a = Math.random() * Math.PI * 2, s = 80 + Math.random() * 260;
@@ -167,13 +230,13 @@ function updateParticles(dt) {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
     p.x += p.vx * dt; p.y += p.vy * dt;
-    p.vx *= 0.98; p.vy *= 0.98; p.vy += 300 * dt;   // 轻微重力
+    p.vx *= 0.98; p.vy *= 0.98; p.vy += 300 * dt;
     p.life -= dt;
     if (p.life <= 0) particles.splice(i, 1);
   }
 }
 
-/* ---------- 屏幕震动（juice） ---------- */
+/* ---------- 屏幕震动 ---------- */
 let shakeT = 0;
 const SHAKE_DUR = 0.35;
 function shake() { shakeT = SHAKE_DUR; }
@@ -203,15 +266,13 @@ function handleTap() {
 }
 function restartAll() {
   score = 0; lives = 3; level = 1; combo = 0;
-  paddle.x = W / 2 - paddle.w / 2; paddle.wideT = 0;
-  powerups = []; particles = [];
+  paddle.x = W / 2 - paddle.w / 2; paddle.wideT = 0; paddle.gunsT = 0;
+  powerups = []; particles = []; bullets = [];
   buildBricks(); stickBallToPaddle();
   state = 'ready';
 }
 
-/* ============================================================================
-   概念 1：游戏主循环 Game Loop（v0.1 已讲，v0.2 逻辑变多了但骨架不变）
-   ========================================================================== */
+/* ---------- 概念 1：游戏主循环 ---------- */
 let last = performance.now();
 function loop(now) {
   const dt = Math.min((now - last) / 1000, 0.033);
@@ -222,13 +283,12 @@ function loop(now) {
 }
 
 function update(dt) {
-  // 挡板移动 + 加长计时
   if (keys['ArrowLeft'])  paddle.x -= paddle.speed * dt;
   if (keys['ArrowRight']) paddle.x += paddle.speed * dt;
   if (paddle.wideT > 0) paddle.wideT -= dt;
+  if (paddle.gunsT > 0) paddle.gunsT -= dt;
   paddle.x = clamp(paddle.x, 0, W - paddleW());
 
-  // 掉落物：下落 → 接住生效 / 掉出消失
   for (let i = powerups.length - 1; i >= 0; i--) {
     const p = powerups[i];
     p.y += p.vy * dt;
@@ -248,25 +308,32 @@ function update(dt) {
   if (state === 'ready') { if (balls[0]) placeBallOnPaddle(balls[0]); return; }
   if (state !== 'playing') return;
 
-  // 火球计时
   for (const b of balls) if (b.pierceT > 0) b.pierceT -= dt;
+
+  // 双枪开火：两头各一发
+  if (paddle.gunsT > 0) {
+    fireT += dt;
+    const pw = paddleW();
+    while (fireT >= GUN_INTERVAL) {
+      fireT -= GUN_INTERVAL;
+      bullets.push({ x: paddle.x + 8, y: paddle.y - 8, vy: -720 });
+      bullets.push({ x: paddle.x + pw - 8, y: paddle.y - 8, vy: -720 });
+      beep(880, .04, 'square', .05);
+    }
+  }
 
   for (let bi = balls.length - 1; bi >= 0; bi--) {
     const ball = balls[bi];
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
-
-    // 拖尾：记录最近 14 个位置
     ball.trail.unshift({ x: ball.x, y: ball.y });
     if (ball.trail.length > 14) ball.trail.pop();
 
-    // 墙壁
     if (ball.x < ball.r)         { ball.x = ball.r;     ball.vx =  Math.abs(ball.vx); beep(200, .05); }
     if (ball.x > W - ball.r)     { ball.x = W - ball.r; ball.vx = -Math.abs(ball.vx); beep(200, .05); }
     if (ball.y < ball.r)         { ball.y = ball.r;     ball.vy =  Math.abs(ball.vy); beep(200, .05); }
-    if (ball.y - ball.r > H)     { balls.splice(bi, 1); continue; }  // 这个球丢了
+    if (ball.y - ball.r > H)     { balls.splice(bi, 1); continue; }
 
-    // 小球 vs 挡板：按击中位置给角度（v0.1 概念 2a）
     const pw = paddleW();
     if (circleHitsRect(ball, { x: paddle.x, y: paddle.y, w: pw, h: paddle.h })) {
       const hit = (ball.x - (paddle.x + pw / 2)) / (pw / 2);
@@ -278,28 +345,47 @@ function update(dt) {
       beep(330, .06);
     }
 
-    // 小球 vs 砖块（v0.1 概念 2b；火球状态下穿砖不反弹）
     for (const b of bricks) {
       if (!b.alive) continue;
       if (circleHitsRect(ball, b)) {
-        b.alive = false;
-        combo++;
-        score += 10 * level * comboMult();
-        burst(b.x + b.w / 2, b.y + b.h / 2, b.color, 10);
-        maybeDropPower(b.x + b.w / 2, b.y + b.h / 2);
+        smashBrick(b);
         if (ball.pierceT <= 0) {
           const overlapX = (ball.r + b.w / 2) - Math.abs(ball.x - (b.x + b.w / 2));
           const overlapY = (ball.r + b.h / 2) - Math.abs(ball.y - (b.y + b.h / 2));
           if (overlapX < overlapY) ball.vx *= -1; else ball.vy *= -1;
         }
-        beep(520 + Math.random() * 200, .05);
         break;
       }
     }
   }
 
-  if (balls.length === 0) { loseLife(); return; }   // 球全丢光才算丢命
+  // 子弹：移动 → 撞砖 → 消砖/消失 → 飞出回收
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const bl = bullets[i];
+    bl.y += bl.vy * dt;
+    if (bl.y < -12) { bullets.splice(i, 1); continue; }
+    for (const b of bricks) {
+      if (!b.alive) continue;
+      if (bl.x > b.x - 2 && bl.x < b.x + b.w + 2 && bl.y > b.y - 10 && bl.y < b.y + b.h) {
+        smashBrick(b);
+        bullets.splice(i, 1);
+        break;
+      }
+    }
+  }
+
+  if (balls.length === 0) { loseLife(); return; }
   if (bricks.every(b => !b.alive)) nextLevel();
+}
+
+/* 消砖的公共逻辑：小球和子弹都调它（计分/连击/粒子/掉落/音效收一处） */
+function smashBrick(b) {
+  b.alive = false;
+  combo++;
+  score += 10 * level * comboMult();
+  burst(b.x + b.w / 2, b.y + b.h / 2, b.color, 10);
+  maybeDropPower(b.x + b.w / 2, b.y + b.h / 2);
+  beep(520 + Math.random() * 200, .05);
 }
 
 function circleHitsRect(c, r) {
@@ -311,9 +397,10 @@ function circleHitsRect(c, r) {
 
 function loseLife() {
   lives--;
-  combo = 0;                 // 丢球连击清零
-  shake();                   // juice：震屏
+  combo = 0;
+  shake();
   burst(W / 2, H - 120, '#ff5d5d', 24);
+  bullets = [];
   beep(160, .25, 'sawtooth', .15);
   if (lives <= 0) {
     state = 'gameover';
@@ -325,7 +412,7 @@ function loseLife() {
 }
 function nextLevel() {
   level++; combo = 0;
-  powerups = [];
+  powerups = []; bullets = [];
   buildBricks();
   stickBallToPaddle();
   state = 'ready';
@@ -344,7 +431,7 @@ function roundRect(x, y, w, h, r) {
 }
 function draw() {
   ctx.save();
-  if (shakeT > 0) {  // juice：屏幕震动
+  if (shakeT > 0) {
     const k = shakeT / SHAKE_DUR * 10;
     ctx.translate((Math.random() * 2 - 1) * k, (Math.random() * 2 - 1) * k);
   }
@@ -353,7 +440,7 @@ function draw() {
   g.addColorStop(0, '#0e1530'); g.addColorStop(1, '#0b1020');
   ctx.fillStyle = g; ctx.fillRect(-20, -20, W + 40, H + 40);
 
-  for (const b of bricks) {   // 砖块
+  for (const b of bricks) {
     if (!b.alive) continue;
     ctx.fillStyle = b.color;
     roundRect(b.x, b.y, b.w, b.h, 5); ctx.fill();
@@ -361,28 +448,41 @@ function draw() {
     roundRect(b.x, b.y, b.w, 8, 5); ctx.fill();
   }
 
-  for (const p of powerups) {  // 掉落物
-    const def = POWERS[p.type];
-    ctx.fillStyle = def.color;
+  for (const p of powerups) {
+    ctx.fillStyle = POWERS[p.type].color;
     roundRect(p.x - p.w / 2, p.y - p.h / 2, p.w, p.h, 13); ctx.fill();
     ctx.fillStyle = '#0b1020'; ctx.font = 'bold 16px sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.fillText(def.label, p.x, p.y + 1);
+    ctx.fillText(POWER_LABEL(p.type), p.x, p.y + 1);
     ctx.textBaseline = 'alphabetic';
   }
 
-  const pw = paddleW();        // 挡板
+  // 子弹
+  ctx.shadowColor = '#ffd32a'; ctx.shadowBlur = 10;
+  ctx.fillStyle = '#ffd32a';
+  for (const bl of bullets) {
+    roundRect(bl.x - 2.5, bl.y - 8, 5, 12, 2.5); ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+
+  const pw = paddleW();
+  // 双枪炮管
+  if (paddle.gunsT > 0) {
+    ctx.fillStyle = '#a55eea';
+    roundRect(paddle.x + 4, paddle.y - 12, 8, 16, 3); ctx.fill();
+    roundRect(paddle.x + pw - 12, paddle.y - 12, 8, 16, 3); ctx.fill();
+  }
   ctx.shadowColor = paddle.wideT > 0 ? '#2ed573' : '#4da3ff'; ctx.shadowBlur = 18;
   ctx.fillStyle = paddle.wideT > 0 ? '#2ed573' : '#4da3ff';
   roundRect(paddle.x, paddle.y, pw, paddle.h, 7); ctx.fill();
   ctx.shadowBlur = 0;
 
-  for (const ball of balls) {  // 小球 + 拖尾（juice）
+  for (const ball of balls) {
     const hot = ball.pierceT > 0;
     for (let i = ball.trail.length - 1; i >= 1; i--) {
-      const t = ball.trail[i], a = (1 - i / ball.trail.length) * 0.3;
+      const tr = ball.trail[i], a = (1 - i / ball.trail.length) * 0.3;
       ctx.fillStyle = hot ? `rgba(255,159,67,${a})` : `rgba(255,255,255,${a})`;
-      ctx.beginPath(); ctx.arc(t.x, t.y, ball.r * (1 - i / (ball.trail.length + 4)), 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(tr.x, tr.y, ball.r * (1 - i / (ball.trail.length + 4)), 0, Math.PI * 2); ctx.fill();
     }
     ctx.shadowColor = hot ? '#ff9f43' : '#fff'; ctx.shadowBlur = 16;
     ctx.fillStyle = hot ? '#ff9f43' : '#fff';
@@ -390,7 +490,7 @@ function draw() {
     ctx.shadowBlur = 0;
   }
 
-  for (const p of particles) {  // 粒子
+  for (const p of particles) {
     ctx.globalAlpha = Math.max(p.life / p.maxLife, 0);
     ctx.fillStyle = p.color;
     ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
@@ -398,22 +498,22 @@ function draw() {
   ctx.globalAlpha = 1;
   ctx.restore();
 
-  // HUD
+  // HUD（全部走双语字典）
   ctx.fillStyle = '#8b98b8'; ctx.font = '20px sans-serif'; ctx.textAlign = 'left';
-  ctx.fillText('分数 ' + score, 16, 36);
+  ctx.fillText(t().score + ' ' + score, 16, 36);
   if (combo >= 2) {
     ctx.fillStyle = '#ffd32a'; ctx.font = 'bold 20px sans-serif';
-    ctx.fillText('连击 ' + combo + '  ×' + comboMult(), 16, 64);
+    ctx.fillText(t().combo(combo, comboMult()), 16, 64);
   }
   ctx.fillStyle = '#8b98b8'; ctx.font = '20px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText('第 ' + level + ' 关', W / 2, 36);
+  ctx.fillText(t().level(level), W / 2, 36);
   ctx.textAlign = 'right';
-  ctx.fillText('❤'.repeat(Math.max(lives, 0)) + '  最佳 ' + best, W - 16, 36);
-  // 生效中的道具计时
+  ctx.fillText('❤'.repeat(Math.max(lives, 0)) + '  ' + t().best + ' ' + best, W - 16, 36);
   const fx = [];
-  if (paddle.wideT > 0) fx.push('▬ ' + Math.ceil(paddle.wideT) + 's');
+  if (paddle.wideT > 0) fx.push(t().fxWide + ' ' + Math.ceil(paddle.wideT) + 's');
   const pt = balls.reduce((m, b) => Math.max(m, b.pierceT), 0);
-  if (pt > 0) fx.push('🔥 ' + Math.ceil(pt) + 's');
+  if (pt > 0) fx.push(t().fxPierce + ' ' + Math.ceil(pt) + 's');
+  if (paddle.gunsT > 0) fx.push(t().fxGuns + ' ' + Math.ceil(paddle.gunsT) + 's');
   if (fx.length) {
     ctx.textAlign = 'center'; ctx.fillStyle = '#8b98b8'; ctx.font = '17px sans-serif';
     ctx.fillText(fx.join('    '), W / 2, H - 16);
@@ -424,17 +524,17 @@ function draw() {
     ctx.textAlign = 'center'; ctx.fillStyle = '#fff';
     if (state === 'ready') {
       ctx.font = 'bold 40px sans-serif';
-      ctx.fillText(level === 1 && score === 0 ? '打砖块' : '第 ' + level + ' 关', W / 2, H / 2 - 30);
+      ctx.fillText(level === 1 && score === 0 ? t().title : t().level(level), W / 2, H / 2 - 30);
       ctx.font = '22px sans-serif'; ctx.fillStyle = '#8b98b8';
-      ctx.fillText('点击 / 空格 发球', W / 2, H / 2 + 20);
+      ctx.fillText(t().tapLaunch, W / 2, H / 2 + 20);
       ctx.font = '18px sans-serif';
-      ctx.fillText('鼠标移动 · 手指拖动 · ← → 键', W / 2, H / 2 + 52);
+      ctx.fillText(t().controls, W / 2, H / 2 + 52);
     } else if (state === 'gameover') {
-      ctx.font = 'bold 44px sans-serif'; ctx.fillText('游戏结束', W / 2, H / 2 - 40);
+      ctx.font = 'bold 44px sans-serif'; ctx.fillText(t().gameOver, W / 2, H / 2 - 40);
       ctx.font = '24px sans-serif'; ctx.fillStyle = '#ffd32a';
-      ctx.fillText('得分 ' + score + '　最佳 ' + best, W / 2, H / 2 + 8);
+      ctx.fillText(t().finalScore(score, best), W / 2, H / 2 + 8);
       ctx.font = '20px sans-serif'; ctx.fillStyle = '#8b98b8';
-      ctx.fillText('点击 / 空格 再来一局', W / 2, H / 2 + 48);
+      ctx.fillText(t().playAgain, W / 2, H / 2 + 48);
     }
   }
 }
