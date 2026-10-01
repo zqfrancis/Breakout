@@ -177,7 +177,8 @@ const POWER_LABEL = p =>
   p === 'multi' ? '×3' : { wide: t().powWide, pierce: t().powPierce, guns: t().powGuns }[p];
 let powerups = [];
 function maybeDropPower(x, y) {
-  if (Math.random() > 0.22) return;
+  if (powerups.length >= 3) return;   // 同屏最多 3 个掉落物，防止刷屏
+  if (Math.random() > 0.10) return;   // 10% 掉率
   const r = Math.random();
   const type = r < 0.30 ? 'multi' : r < 0.60 ? 'wide' : r < 0.85 ? 'pierce' : 'guns';
   powerups.push({ x, y, vy: 150, type, w: 52, h: 28 });
