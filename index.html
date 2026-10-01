@@ -35,6 +35,8 @@
    v0.3.1 掉率 22%→10% + 同屏掉落物上限 3 个（防刷屏）；
    v0.3.2 语言按钮改画进 canvas（DOM 按钮曾盖住血条），血条/最佳挪到 HUD 第二行。
    v0.3.3 右下角加版本号（排 CDN 缓存用）。
+   v0.4 多血量砖块：关卡越深砖越硬（L1 全 1 血，L2–3 顶部 2 血，L4+ 顶部 3 血封顶），
+       硬砖白边框 + 数字显示剩余血量——新概念 7：生命值与伤害系统。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
 
@@ -148,12 +150,17 @@ const ROW_COLORS = ['#ff5d5d', '#ff9f43', '#ffd32a', '#2ed573', '#1e90ff', '#a55
 let bricks = [];
 function buildBricks() {
   bricks = [];
+  // 关卡越深砖越硬：L1 全是 1 血，L2–3 顶部出现 2 血，L4 起顶部 3 血封顶
+  const maxHp = Math.min(3, 1 + Math.floor(level / 2));
   for (let r = 0; r < ROWS; r++)
-    for (let c = 0; c < COLS; c++)
+    for (let c = 0; c < COLS; c++) {
+      const hp = 1 + Math.floor((maxHp - 1) * (1 - r / (ROWS - 1)));  // 越靠上越硬
       bricks.push({
         x: GAP + c * (BRICK_W + GAP), y: TOP + r * (BRICK_H + GAP),
-        w: BRICK_W, h: BRICK_H, color: ROW_COLORS[r % ROW_COLORS.length], alive: true,
+        w: BRICK_W, h: BRICK_H, color: ROW_COLORS[r % ROW_COLORS.length],
+        alive: true, hp, maxHp: hp,
       });
+    }
 }
 
 /* ---------- 概念 3：掉落物系统 ---------- */
@@ -350,7 +357,7 @@ function update(dt) {
     for (const b of bricks) {
       if (!b.alive) continue;
       if (circleHitsRect(ball, b)) {
-        smashBrick(b);
+        damageBrick(b, ball.pierceT > 0 ? 99 : 1);   // 火球无视血量，直接砸穿
         if (ball.pierceT <= 0) {
           const overlapX = (ball.r + b.w / 2) - Math.abs(ball.x - (b.x + b.w / 2));
           const overlapY = (ball.r + b.h / 2) - Math.abs(ball.y - (b.y + b.h / 2));
@@ -369,7 +376,7 @@ function update(dt) {
     for (const b of bricks) {
       if (!b.alive) continue;
       if (bl.x > b.x - 2 && bl.x < b.x + b.w + 2 && bl.y > b.y - 10 && bl.y < b.y + b.h) {
-        smashBrick(b);
+        damageBrick(b, 1);   // 子弹每次只打 1 点血，硬砖得多蹭几下
         bullets.splice(i, 1);
         break;
       }
@@ -380,14 +387,22 @@ function update(dt) {
   if (bricks.every(b => !b.alive)) nextLevel();
 }
 
-/* 消砖的公共逻辑：小球和子弹都调它（计分/连击/粒子/掉落/音效收一处） */
-function smashBrick(b) {
-  b.alive = false;
-  combo++;
-  score += 10 * level * comboMult();
-  burst(b.x + b.w / 2, b.y + b.h / 2, b.color, 10);
-  maybeDropPower(b.x + b.w / 2, b.y + b.h / 2);
-  beep(520 + Math.random() * 200, .05);
+/* 概念 7：生命值与伤害系统——砖块有了 hp，不再是"碰就碎"。
+   小球/子弹造成伤害，hp 归零才真正消砖（计分、连击、掉道具只在消砖时触发） */
+function damageBrick(b, dmg) {
+  b.hp -= dmg;
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  if (b.hp <= 0) {
+    b.alive = false;
+    combo++;
+    score += 10 * level * comboMult();
+    burst(cx, cy, b.color, 10);
+    maybeDropPower(cx, cy);
+    beep(520 + Math.random() * 200, .05);
+  } else {
+    burst(cx, cy, '#ffffff', 4);       // 没碎：只溅几个小火花
+    beep(300, .05, 'square', .08);     // 声音更闷，告诉你"这砖还硬着"
+  }
 }
 
 function circleHitsRect(c, r) {
@@ -448,6 +463,17 @@ function draw() {
     roundRect(b.x, b.y, b.w, b.h, 5); ctx.fill();
     ctx.fillStyle = 'rgba(255,255,255,.25)';
     roundRect(b.x, b.y, b.w, 8, 5); ctx.fill();
+    if (b.maxHp > 1) {
+      // 硬砖：白色描边 + 数字显示剩余血量，一眼看出"这块要打几下"
+      ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2;
+      roundRect(b.x + 2, b.y + 2, b.w - 4, b.h - 4, 4); ctx.stroke();
+      if (b.hp > 1) {
+        ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.font = 'bold 15px sans-serif';
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(b.hp, b.x + b.w / 2, b.y + b.h / 2 + 1);
+        ctx.textBaseline = 'alphabetic';
+      }
+    }
   }
 
   for (const p of powerups) {
@@ -522,7 +548,7 @@ function draw() {
   }
   // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
   ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('v0.3.3', W - 10, H - 34);
+  ctx.fillText('v0.4', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
