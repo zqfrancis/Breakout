@@ -35,7 +35,7 @@
    v0.3.1 掉率 22%→10% + 同屏掉落物上限 3 个（防刷屏）；
    v0.3.2 语言按钮改画进 canvas（DOM 按钮曾盖住血条），血条/最佳挪到 HUD 第二行。
    v0.3.3 右下角加版本号（排 CDN 缓存用）。
-   v0.4 多血量砖块：关卡越深砖越硬（L1 全 1 血，L2–3 顶部 2 血，L4+ 顶部 3 血封顶），
+   v0.5 硬砖随机散布（不再固定顶部）：关卡越深硬砖越多，3 血封顶。
        硬砖白边框 + 数字显示剩余血量——新概念 7：生命值与伤害系统。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
@@ -150,17 +150,26 @@ const ROW_COLORS = ['#ff5d5d', '#ff9f43', '#ffd32a', '#2ed573', '#1e90ff', '#a55
 let bricks = [];
 function buildBricks() {
   bricks = [];
-  // 关卡越深砖越硬：L1 全是 1 血，L2–3 顶部出现 2 血，L4 起顶部 3 血封顶
-  const maxHp = Math.min(3, 1 + Math.floor(level / 2));
   for (let r = 0; r < ROWS; r++)
     for (let c = 0; c < COLS; c++) {
-      const hp = 1 + Math.floor((maxHp - 1) * (1 - r / (ROWS - 1)));  // 越靠上越硬
       bricks.push({
         x: GAP + c * (BRICK_W + GAP), y: TOP + r * (BRICK_H + GAP),
         w: BRICK_W, h: BRICK_H, color: ROW_COLORS[r % ROW_COLORS.length],
-        alive: true, hp, maxHp: hp,
+        alive: true, hp: 1, maxHp: 1,
       });
     }
+  // 关卡越深砖越硬：硬砖随机散布，3 血封顶
+  // L1 全 1 血；L2 起出现 2 血（每关多一些）；L4 起再混入 3 血
+  const total = bricks.length;
+  const n2 = level < 2 ? 0 : Math.min(4 + 2 * (level - 2), Math.floor(total / 2));
+  const n3 = level < 4 ? 0 : Math.min(2 + 2 * (level - 4), Math.floor(total / 4));
+  const idx = bricks.map((_, i) => i);
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [idx[i], idx[j]] = [idx[j], idx[i]];
+  }
+  idx.slice(0, n3).forEach(i => { bricks[i].hp = 3; bricks[i].maxHp = 3; });
+  idx.slice(n3, n3 + n2).forEach(i => { bricks[i].hp = 2; bricks[i].maxHp = 2; });
 }
 
 /* ---------- 概念 3：掉落物系统 ---------- */
@@ -548,7 +557,7 @@ function draw() {
   }
   // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
   ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('v0.4', W - 10, H - 34);
+  ctx.fillText('v0.5', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
