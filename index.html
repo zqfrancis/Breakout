@@ -10,7 +10,6 @@
     display: flex; align-items: center; justify-content: center;
     overflow: hidden; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
   }
-  #wrap { position: relative; }
   canvas {
     aspect-ratio: 2 / 3;
     height: min(96vh, 150vw);
@@ -19,22 +18,10 @@
     touch-action: none; user-select: none; -webkit-user-select: none;
     display: block;
   }
-  #langBtn {
-    position: absolute; top: 10px; right: 10px; z-index: 2;
-    padding: 6px 14px; border-radius: 999px;
-    border: 1px solid rgba(255,255,255,.25);
-    background: rgba(10,15,35,.65); color: #fff;
-    font-size: 14px; font-weight: 600; cursor: pointer;
-    backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px);
-  }
-  #langBtn:active { transform: scale(.94); }
 </style>
 </head>
 <body>
-<div id="wrap">
-  <canvas id="game"></canvas>
-  <button id="langBtn">EN</button>
-</div>
+<canvas id="game"></canvas>
 <script>
 'use strict';
 /* ============================================================================
@@ -45,6 +32,8 @@
      - 中/EN 双语切换：所有界面文字收进 T 字典，右上角按钮一键切换，偏好存 localStorage
      - 双枪道具：挡板两头长炮管，自动向上开火——新概念 6：子弹系统
        （生成 → 移动 → 碰撞 → 回收，跟粒子系统一样，是放哪款游戏都通用的技术）
+   v0.3.1 掉率 22%→10% + 同屏掉落物上限 3 个（防刷屏）；
+   v0.3.2 语言按钮改画进 canvas（DOM 按钮曾盖住血条），血条/最佳挪到 HUD 第二行。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
 
@@ -86,18 +75,18 @@ const T = {
 };
 let lang = localStorage.getItem('breakout-lang') || 'zh';
 const t = () => T[lang];
-const langBtn = document.getElementById('langBtn');
+/* 语言按钮直接画在 canvas 里（右上角），和 HUD 同一坐标系，
+   彻底避免 DOM 按钮盖住 canvas 文字——v0.3 的 DOM 按钮就犯了这个错 */
+const LANG_BTN = { x: W - 96, y: 12, w: 84, h: 40 };
 function applyLang() {
   document.title = `${t().title} · ${t().lesson}`;
-  langBtn.textContent = lang === 'zh' ? 'EN' : '中文';
   localStorage.setItem('breakout-lang', lang);
 }
-langBtn.addEventListener('click', e => {
-  e.stopPropagation();
+function toggleLang() {
   lang = lang === 'zh' ? 'en' : 'zh';
   applyLang();
   beep(660, .06);
-});
+}
 applyLang();
 
 /* ---------- 音效：WebAudio 现场合成 ---------- */
@@ -257,8 +246,19 @@ function canvasX(clientX) {
 canvas.addEventListener('pointermove', e => {
   paddle.x = clamp(canvasX(e.clientX) - paddleW() / 2, 0, W - paddleW());
 });
+function canvasY(clientY) {
+  const r = canvas.getBoundingClientRect();
+  return (clientY - r.top) * (H / r.height);
+}
 canvas.addEventListener('pointerdown', e => {
-  paddle.x = clamp(canvasX(e.clientX) - paddleW() / 2, 0, W - paddleW());
+  const cx = canvasX(e.clientX), cy = canvasY(e.clientY);
+  // 先判语言按钮：点中只切换语言，不动挡板、不发球
+  if (cx >= LANG_BTN.x && cx <= LANG_BTN.x + LANG_BTN.w &&
+      cy >= LANG_BTN.y && cy <= LANG_BTN.y + LANG_BTN.h) {
+    toggleLang();
+    return;
+  }
+  paddle.x = clamp(cx - paddleW() / 2, 0, W - paddleW());
   handleTap();
 });
 function handleTap() {
@@ -509,7 +509,7 @@ function draw() {
   ctx.fillStyle = '#8b98b8'; ctx.font = '20px sans-serif'; ctx.textAlign = 'center';
   ctx.fillText(t().level(level), W / 2, 36);
   ctx.textAlign = 'right';
-  ctx.fillText('❤'.repeat(Math.max(lives, 0)) + '  ' + t().best + ' ' + best, W - 16, 36);
+  ctx.fillText('❤'.repeat(Math.max(lives, 0)) + '  ' + t().best + ' ' + best, W - 16, 64);
   const fx = [];
   if (paddle.wideT > 0) fx.push(t().fxWide + ' ' + Math.ceil(paddle.wideT) + 's');
   const pt = balls.reduce((m, b) => Math.max(m, b.pierceT), 0);
@@ -519,6 +519,17 @@ function draw() {
     ctx.textAlign = 'center'; ctx.fillStyle = '#8b98b8'; ctx.font = '17px sans-serif';
     ctx.fillText(fx.join('    '), W / 2, H - 16);
   }
+
+  // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
+  ctx.fillStyle = 'rgba(10,15,35,.7)';
+  roundRect(LANG_BTN.x, LANG_BTN.y, LANG_BTN.w, LANG_BTN.h, 20); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1.5;
+  roundRect(LANG_BTN.x, LANG_BTN.y, LANG_BTN.w, LANG_BTN.h, 20); ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.font = 'bold 18px sans-serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillText(lang === 'zh' ? 'EN' : '中文',
+    LANG_BTN.x + LANG_BTN.w / 2, LANG_BTN.y + LANG_BTN.h / 2 + 1);
+  ctx.textBaseline = 'alphabetic';
 
   if (state !== 'playing') {
     ctx.fillStyle = 'rgba(5,8,20,.72)'; ctx.fillRect(0, 0, W, H);
