@@ -34,6 +34,7 @@
        （生成 → 移动 → 碰撞 → 回收，跟粒子系统一样，是放哪款游戏都通用的技术）
    v0.3.1 掉率 22%→10% + 同屏掉落物上限 3 个（防刷屏）；
    v0.3.2 语言按钮改画进 canvas（DOM 按钮曾盖住血条），血条/最佳挪到 HUD 第二行。
+   v0.3.3 右下角加版本号（排 CDN 缓存用）。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
 
@@ -519,6 +520,9 @@ function draw() {
     ctx.textAlign = 'center'; ctx.fillStyle = '#8b98b8'; ctx.font = '17px sans-serif';
     ctx.fillText(fx.join('    '), W / 2, H - 16);
   }
+  // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
+  ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText('v0.3.3', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
