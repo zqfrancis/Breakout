@@ -35,7 +35,7 @@
    v0.3.1 掉率 22%→10% + 同屏掉落物上限 3 个（防刷屏）；
    v0.3.2 语言按钮改画进 canvas（DOM 按钮曾盖住血条），血条/最佳挪到 HUD 第二行。
    v0.3.3 右下角加版本号（排 CDN 缓存用）。
-   v0.5 硬砖随机散布（不再固定顶部）：关卡越深硬砖越多，3 血封顶。
+   v0.6 关卡背景：5 张图随关卡切换（1 生态城市 / 2 极地雪山 / 3 高空飞行器 / 4 亚轨道 / 5 深空），5 关后循环；cover 铺满 + 深色叠层保可读性。
        硬砖白边框 + 数字显示剩余血量——新概念 7：生命值与伤害系统。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
@@ -141,6 +141,31 @@ function launchBall() {
   b.vy = speed * Math.sin(a);
   state = 'playing';
   beep(440, 0.08);
+}
+
+/* ---------- 关卡背景 ---------- */
+// 5 张关卡背景图（bg/level1..5.jpg）：随关卡切换，5 关后循环
+const BG_IMGS = [];
+for (let i = 1; i <= 5; i++) {
+  const im = new Image();
+  im.src = 'bg/level' + i + '.jpg';
+  BG_IMGS.push(im);
+}
+// cover 模式铺满画布：深色叠一层，保证砖块/挡板/HUD 依然清晰可读
+function drawBackground() {
+  const img = BG_IMGS[(level - 1) % BG_IMGS.length];
+  ctx.fillStyle = '#0b1020'; ctx.fillRect(-20, -20, W + 40, H + 40);
+  if (img.complete && img.naturalWidth > 0) {
+    const s = Math.max(W / img.naturalWidth, H / img.naturalHeight);
+    const dw = img.naturalWidth * s, dh = img.naturalHeight * s;
+    ctx.drawImage(img, (W - dw) / 2, (H - dh) / 2, dw, dh);
+    ctx.fillStyle = 'rgba(5,8,20,.55)'; ctx.fillRect(-20, -20, W + 40, H + 40);
+  } else {
+    // 图片还没加载好：先用原来的渐变兜底
+    const g = ctx.createLinearGradient(0, 0, 0, H);
+    g.addColorStop(0, '#0e1530'); g.addColorStop(1, '#0b1020');
+    ctx.fillStyle = g; ctx.fillRect(-20, -20, W + 40, H + 40);
+  }
 }
 
 /* ---------- 砖块 ---------- */
@@ -462,9 +487,7 @@ function draw() {
     ctx.translate((Math.random() * 2 - 1) * k, (Math.random() * 2 - 1) * k);
   }
 
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, '#0e1530'); g.addColorStop(1, '#0b1020');
-  ctx.fillStyle = g; ctx.fillRect(-20, -20, W + 40, H + 40);
+  drawBackground();
 
   for (const b of bricks) {
     if (!b.alive) continue;
@@ -557,7 +580,7 @@ function draw() {
   }
   // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
   ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('v0.5', W - 10, H - 34);
+  ctx.fillText('v0.6', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
