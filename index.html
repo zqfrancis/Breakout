@@ -36,6 +36,7 @@
    v0.3.2 语言按钮改画进 canvas（DOM 按钮曾盖住血条），血条/最佳挪到 HUD 第二行。
    v0.3.3 右下角加版本号（排 CDN 缓存用）。
    v0.6 关卡背景：5 张图随关卡切换（1 生态城市 / 2 极地雪山 / 3 高空飞行器 / 4 亚轨道 / 5 深空），5 关后循环；cover 铺满 + 深色叠层保可读性。
+   v0.7 科技感重绘：砖块变暗色玻璃 + 霓虹发光边框 + 内部能量线（硬砖白色内框带呼吸脉冲）；球变径向渐变能量球（青/橙）；子弹变激光束（发光弹体 + 白色核心）。
        硬砖白边框 + 数字显示剩余血量——新概念 7：生命值与伤害系统。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
@@ -317,9 +318,11 @@ function restartAll() {
 
 /* ---------- 概念 1：游戏主循环 ---------- */
 let last = performance.now();
+let timeSec = 0;  // 全局时间（秒）：给呼吸灯/脉冲动画用
 function loop(now) {
   const dt = Math.min((now - last) / 1000, 0.033);
   last = now;
+  timeSec = now / 1000;
   update(dt);
   draw();
   requestAnimationFrame(loop);
@@ -480,6 +483,11 @@ function roundRect(x, y, w, h, r) {
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
 }
+// '#rrggbb' + 透明度 → 'rgba(r,g,b,a)'
+function hexA(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
 function draw() {
   ctx.save();
   if (shakeT > 0) {
@@ -489,20 +497,34 @@ function draw() {
 
   drawBackground();
 
+  // 砖块（科技感）：暗色玻璃底 + 霓虹发光边框 + 内部能量线
   for (const b of bricks) {
     if (!b.alive) continue;
-    ctx.fillStyle = b.color;
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+    const bg = ctx.createLinearGradient(0, b.y, 0, b.y + b.h);
+    bg.addColorStop(0, 'rgba(10,16,34,.94)');
+    bg.addColorStop(1, 'rgba(18,28,54,.94)');
+    ctx.fillStyle = bg;
     roundRect(b.x, b.y, b.w, b.h, 5); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,.25)';
-    roundRect(b.x, b.y, b.w, 8, 5); ctx.fill();
+    ctx.shadowColor = b.color; ctx.shadowBlur = 9;
+    ctx.strokeStyle = b.color; ctx.lineWidth = 2;
+    roundRect(b.x + 1.5, b.y + 1.5, b.w - 3, b.h - 3, 4); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,.16)';
+    roundRect(b.x + 5, b.y + 3.5, b.w - 10, 2.5, 1.2); ctx.fill();
+    ctx.fillStyle = hexA(b.color, .5);
+    ctx.fillRect(b.x + 7, cy - 1, b.w - 14, 2);
     if (b.maxHp > 1) {
-      // 硬砖：白色描边 + 数字显示剩余血量，一眼看出"这块要打几下"
-      ctx.strokeStyle = 'rgba(255,255,255,.55)'; ctx.lineWidth = 2;
-      roundRect(b.x + 2, b.y + 2, b.w - 4, b.h - 4, 4); ctx.stroke();
+      // 硬砖：呼吸脉冲的白色内框 + 血量数字，一眼看出"这块要打几下"
+      const pulse = .5 + .3 * Math.sin(timeSec * 5 + cx * .05);
+      ctx.shadowColor = '#fff'; ctx.shadowBlur = 8;
+      ctx.strokeStyle = `rgba(255,255,255,${pulse})`; ctx.lineWidth = 2;
+      roundRect(b.x + 4, b.y + 4, b.w - 8, b.h - 8, 3); ctx.stroke();
+      ctx.shadowBlur = 0;
       if (b.hp > 1) {
-        ctx.fillStyle = 'rgba(255,255,255,.92)'; ctx.font = 'bold 15px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.font = 'bold 15px sans-serif';
         ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-        ctx.fillText(b.hp, b.x + b.w / 2, b.y + b.h / 2 + 1);
+        ctx.fillText(b.hp, cx, cy + 1);
         ctx.textBaseline = 'alphabetic';
       }
     }
@@ -517,13 +539,19 @@ function draw() {
     ctx.textBaseline = 'alphabetic';
   }
 
-  // 子弹
-  ctx.shadowColor = '#ffd32a'; ctx.shadowBlur = 10;
-  ctx.fillStyle = '#ffd32a';
+  // 子弹（科技感）：激光束——发光弹体 + 白色能量核心
   for (const bl of bullets) {
-    roundRect(bl.x - 2.5, bl.y - 8, 5, 12, 2.5); ctx.fill();
+    ctx.shadowColor = '#ffd32a'; ctx.shadowBlur = 12;
+    const bg2 = ctx.createLinearGradient(0, bl.y - 12, 0, bl.y + 6);
+    bg2.addColorStop(0, 'rgba(255,211,42,0)');
+    bg2.addColorStop(.55, '#ffd32a');
+    bg2.addColorStop(1, '#fff6c9');
+    ctx.strokeStyle = bg2; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(bl.x, bl.y + 6); ctx.lineTo(bl.x, bl.y - 12); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(255,255,255,.95)'; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.moveTo(bl.x, bl.y + 2); ctx.lineTo(bl.x, bl.y - 10); ctx.stroke();
   }
-  ctx.shadowBlur = 0;
 
   const pw = paddleW();
   // 双枪炮管
@@ -541,12 +569,18 @@ function draw() {
     const hot = ball.pierceT > 0;
     for (let i = ball.trail.length - 1; i >= 1; i--) {
       const tr = ball.trail[i], a = (1 - i / ball.trail.length) * 0.3;
-      ctx.fillStyle = hot ? `rgba(255,159,67,${a})` : `rgba(255,255,255,${a})`;
+      ctx.fillStyle = hot ? `rgba(255,159,67,${a})` : `rgba(125,249,255,${a})`;
       ctx.beginPath(); ctx.arc(tr.x, tr.y, ball.r * (1 - i / (ball.trail.length + 4)), 0, Math.PI * 2); ctx.fill();
     }
-    ctx.shadowColor = hot ? '#ff9f43' : '#fff'; ctx.shadowBlur = 16;
-    ctx.fillStyle = hot ? '#ff9f43' : '#fff';
-    ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.fill();
+    // 球（科技感）：能量球体——径向渐变内核 + 光晕
+    const mid = hot ? '#ff9f43' : '#7df9ff';
+    ctx.shadowColor = mid; ctx.shadowBlur = 16;
+    const rg = ctx.createRadialGradient(ball.x, ball.y, 0, ball.x, ball.y, ball.r * 1.7);
+    rg.addColorStop(0, '#ffffff');
+    rg.addColorStop(.45, mid);
+    rg.addColorStop(1, hexA(mid, 0));
+    ctx.fillStyle = rg;
+    ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r * 1.7, 0, Math.PI * 2); ctx.fill();
     ctx.shadowBlur = 0;
   }
 
@@ -580,7 +614,7 @@ function draw() {
   }
   // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
   ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('v0.6', W - 10, H - 34);
+  ctx.fillText('v0.7', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
