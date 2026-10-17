@@ -37,6 +37,7 @@
    v0.3.3 右下角加版本号（排 CDN 缓存用）。
    v0.6 关卡背景：5 张图随关卡切换（1 生态城市 / 2 极地雪山 / 3 高空飞行器 / 4 亚轨道 / 5 深空），5 关后循环；cover 铺满 + 深色叠层保可读性。
    v0.7 科技感重绘：砖块变暗色玻璃 + 霓虹发光边框 + 内部能量线（硬砖白色内框带呼吸脉冲）；球变径向渐变能量球（青/橙）；子弹变激光束（发光弹体 + 白色核心）。
+   v0.8 挡板科技化重绘：霓虹能量挡板（暗色能量仓 + 呼吸霓虹边框 + 内部能量流 + 端部能量节点），双枪炮管激光化（金属发射器 + 发光炮口环 + 瞄准光束 + 开火闪光）。
        硬砖白边框 + 数字显示剩余血量——新概念 7：生命值与伤害系统。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
@@ -245,6 +246,7 @@ function applyPower(type) {
 let bullets = [];   // {x, y, vy}
 const GUN_INTERVAL = 0.25;
 let fireT = 0;
+let gunFlashT = 0;  // 炮口闪光（开火瞬间点亮，v0.8）
 
 /* ---------- 概念 4：粒子系统 ---------- */
 let particles = [];
@@ -350,6 +352,7 @@ function update(dt) {
 
   updateParticles(dt);
   if (shakeT > 0) shakeT -= dt;
+  if (gunFlashT > 0) gunFlashT -= dt;   // v0.8：炮口闪光衰减
 
   if (state === 'ready') { if (balls[0]) placeBallOnPaddle(balls[0]); return; }
   if (state !== 'playing') return;
@@ -364,6 +367,7 @@ function update(dt) {
       fireT -= GUN_INTERVAL;
       bullets.push({ x: paddle.x + 8, y: paddle.y - 8, vy: -720 });
       bullets.push({ x: paddle.x + pw - 8, y: paddle.y - 8, vy: -720 });
+      gunFlashT = 0.08;   // v0.8：开火瞬间炮口闪光
       beep(880, .04, 'square', .05);
     }
   }
@@ -488,6 +492,78 @@ function hexA(hex, a) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
+// 挡板（科技感 v0.8）：霓虹能量挡板——暗色能量仓 + 呼吸霓虹边框 + 内部能量流 + 端部能量节点
+// 双枪激活时炮管激光化：金属发射器 + 发光炮口环 + 瞄准光束 + 开火闪光
+function drawPaddle() {
+  const pw = paddleW();
+  const neon = paddle.wideT > 0 ? '#2ed573' : '#4da3ff';
+
+  if (paddle.gunsT > 0) {
+    for (const gx of [paddle.x + 8, paddle.x + pw - 8]) {
+      // 金属发射器本体
+      const mg = ctx.createLinearGradient(gx - 5, 0, gx + 5, 0);
+      mg.addColorStop(0, '#2b3350');
+      mg.addColorStop(.5, '#5a6687');
+      mg.addColorStop(1, '#232a44');
+      ctx.fillStyle = mg;
+      roundRect(gx - 5, paddle.y - 14, 10, 16, 3); ctx.fill();
+      // 发光炮口环
+      ctx.shadowColor = '#a55eea'; ctx.shadowBlur = 10;
+      ctx.strokeStyle = '#d5b3ff'; ctx.lineWidth = 2;
+      roundRect(gx - 4, paddle.y - 14, 8, 5, 2); ctx.stroke();
+      ctx.shadowBlur = 0;
+      // 瞄准光束（激光化）
+      const flick = .28 + .12 * Math.sin(timeSec * 30 + gx);
+      const beam = ctx.createLinearGradient(0, paddle.y - 52, 0, paddle.y - 14);
+      beam.addColorStop(0, 'rgba(165,94,234,0)');
+      beam.addColorStop(1, `rgba(213,179,255,${flick})`);
+      ctx.fillStyle = beam;
+      ctx.fillRect(gx - 1.5, paddle.y - 52, 3, 38);
+      // 开火瞬间炮口闪光
+      if (gunFlashT > 0) {
+        ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 18;
+        ctx.fillStyle = 'rgba(255,255,255,.95)';
+        ctx.beginPath(); ctx.arc(gx, paddle.y - 15, 4, 0, Math.PI * 2); ctx.fill();
+        ctx.shadowBlur = 0;
+      }
+    }
+  }
+
+  // 挡板本体：暗色能量仓
+  const py = paddle.y, ph = paddle.h;
+  const bg = ctx.createLinearGradient(0, py, 0, py + ph);
+  bg.addColorStop(0, 'rgba(16,24,48,.96)');
+  bg.addColorStop(1, 'rgba(8,13,28,.96)');
+  ctx.fillStyle = bg;
+  roundRect(paddle.x, py, pw, ph, 7); ctx.fill();
+
+  // 霓虹发光边缘（呼吸脉冲）
+  const pulse = .75 + .25 * Math.sin(timeSec * 4);
+  ctx.shadowColor = neon; ctx.shadowBlur = 18;
+  ctx.strokeStyle = hexA(neon, pulse); ctx.lineWidth = 2;
+  roundRect(paddle.x + 1.5, py + 1.5, pw - 3, ph - 3, 6); ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // 顶部轮廓高光
+  ctx.fillStyle = hexA(neon, .35);
+  roundRect(paddle.x + 6, py + 2, pw - 12, 2, 1); ctx.fill();
+
+  // 内部能量流：水平流动的光带
+  const fx = paddle.x + ((timeSec * 140) % (pw + 40)) - 20;
+  const flow = ctx.createLinearGradient(fx - 30, 0, fx + 30, 0);
+  flow.addColorStop(0, hexA(neon, 0));
+  flow.addColorStop(.5, hexA(neon, .55));
+  flow.addColorStop(1, hexA(neon, 0));
+  ctx.fillStyle = flow;
+  roundRect(paddle.x + 6, py + ph / 2 - 1.5, pw - 12, 3, 1.5); ctx.fill();
+
+  // 端部能量节点
+  ctx.shadowColor = neon; ctx.shadowBlur = 12;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath(); ctx.arc(paddle.x + 7, py + ph / 2, 2.6, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(paddle.x + pw - 7, py + ph / 2, 2.6, 0, Math.PI * 2); ctx.fill();
+  ctx.shadowBlur = 0;
+}
 function draw() {
   ctx.save();
   if (shakeT > 0) {
@@ -553,17 +629,8 @@ function draw() {
     ctx.beginPath(); ctx.moveTo(bl.x, bl.y + 2); ctx.lineTo(bl.x, bl.y - 10); ctx.stroke();
   }
 
-  const pw = paddleW();
-  // 双枪炮管
-  if (paddle.gunsT > 0) {
-    ctx.fillStyle = '#a55eea';
-    roundRect(paddle.x + 4, paddle.y - 12, 8, 16, 3); ctx.fill();
-    roundRect(paddle.x + pw - 12, paddle.y - 12, 8, 16, 3); ctx.fill();
-  }
-  ctx.shadowColor = paddle.wideT > 0 ? '#2ed573' : '#4da3ff'; ctx.shadowBlur = 18;
-  ctx.fillStyle = paddle.wideT > 0 ? '#2ed573' : '#4da3ff';
-  roundRect(paddle.x, paddle.y, pw, paddle.h, 7); ctx.fill();
-  ctx.shadowBlur = 0;
+  // 挡板（科技感 v0.8）：独立 drawPaddle，含霓虹能量挡板 + 激光化双枪炮管
+  drawPaddle();
 
   for (const ball of balls) {
     const hot = ball.pierceT > 0;
@@ -614,7 +681,7 @@ function draw() {
   }
   // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
   ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('v0.7', W - 10, H - 34);
+  ctx.fillText('v0.8', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
