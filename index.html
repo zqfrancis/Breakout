@@ -39,6 +39,7 @@
    v0.7 科技感重绘：砖块变暗色玻璃 + 霓虹发光边框 + 内部能量线（硬砖白色内框带呼吸脉冲）；球变径向渐变能量球（青/橙）；子弹变激光束（发光弹体 + 白色核心）。
    v0.8 挡板科技化重绘：霓虹能量挡板（暗色能量仓 + 呼吸霓虹边框 + 内部能量流 + 端部能量节点），双枪炮管激光化（金属发射器 + 发光炮口环 + 瞄准光束 + 开火闪光）。
        硬砖白边框 + 数字显示剩余血量——新概念 7：生命值与伤害系统。
+   v0.9 移动砖块（难度多样化）：L3+ 部分 2 血砖横向巡逻（速度随关卡递增），撞边界反弹；小球/子弹/火球照常命中——新概念 8：动态障碍。L1 仍全 1 血温和开局。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
 
@@ -197,6 +198,18 @@ function buildBricks() {
   }
   idx.slice(0, n3).forEach(i => { bricks[i].hp = 3; bricks[i].maxHp = 3; });
   idx.slice(n3, n3 + n2).forEach(i => { bricks[i].hp = 2; bricks[i].maxHp = 2; });
+  // v0.9 移动砖块：L3+ 部分 2 血砖变成横向巡逻砖，撞边界反弹。
+  // 巡逻速度随关卡递增（70 + 25*(level-3)，封顶 170 px/s）；数量也随关卡递增（2→6）。
+  // 火球/子弹/小球命中逻辑不变——damageBrick 和碰撞检测用的都是砖块当前 x 坐标。
+  if (level >= 3) {
+    const nMove = Math.min(2 + (level - 3), 6);
+    const movers = bricks.filter(b => b.maxHp === 2).slice(0, nMove);
+    for (const b of movers) {
+      b.mvx = Math.min(70 + 25 * (level - 3), 170);
+      b.dir = Math.random() < 0.5 ? -1 : 1;
+      b.minX = GAP; b.maxX = W - GAP - b.w;
+    }
+  }
 }
 
 /* ---------- 概念 3：掉落物系统 ---------- */
@@ -336,6 +349,15 @@ function update(dt) {
   if (paddle.wideT > 0) paddle.wideT -= dt;
   if (paddle.gunsT > 0) paddle.gunsT -= dt;
   paddle.x = clamp(paddle.x, 0, W - paddleW());
+
+  // v0.9 移动砖块：横向巡逻、撞边界反弹。放在所有状态分支之前，
+  // 这样 ready/过关动画下砖块也在动，玩家一眼看出"这关有砖会走"。
+  for (const b of bricks) {
+    if (!b.alive || !b.mvx) continue;
+    b.x += b.dir * b.mvx * dt;
+    if (b.x <= b.minX)      { b.x = b.minX; b.dir = 1; }
+    else if (b.x >= b.maxX) { b.x = b.maxX; b.dir = -1; }
+  }
 
   for (let i = powerups.length - 1; i >= 0; i--) {
     const p = powerups[i];
@@ -604,6 +626,17 @@ function draw() {
         ctx.textBaseline = 'alphabetic';
       }
     }
+    if (b.mvx) {
+      // v0.9 移动砖：两端画方向箭头，告诉玩家"这块砖会横向走"
+      ctx.fillStyle = hexA(b.color, .9);
+      const ax = 10;
+      ctx.beginPath();
+      ctx.moveTo(b.x + ax - 4, cy); ctx.lineTo(b.x + ax + 3.5, cy - 5.5);
+      ctx.lineTo(b.x + ax + 3.5, cy + 5.5); ctx.closePath(); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.w - ax + 4, cy); ctx.lineTo(b.x + b.w - ax - 3.5, cy - 5.5);
+      ctx.lineTo(b.x + b.w - ax - 3.5, cy + 5.5); ctx.closePath(); ctx.fill();
+    }
   }
 
   for (const p of powerups) {
@@ -681,7 +714,7 @@ function draw() {
   }
   // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
   ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('v0.8', W - 10, H - 34);
+  ctx.fillText('v0.9', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
