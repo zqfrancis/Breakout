@@ -40,6 +40,7 @@
    v0.8 挡板科技化重绘：霓虹能量挡板（暗色能量仓 + 呼吸霓虹边框 + 内部能量流 + 端部能量节点），双枪炮管激光化（金属发射器 + 发光炮口环 + 瞄准光束 + 开火闪光）。
        硬砖白边框 + 数字显示剩余血量——新概念 7：生命值与伤害系统。
    v0.9 移动砖块（难度多样化）：L3+ 部分 2 血砖横向巡逻（速度随关卡递增），撞边界反弹；小球/子弹/火球照常命中——新概念 8：动态障碍。L1 仍全 1 血温和开局。
+   v0.10 掉落物全息化（未来科技风）：悬浮全息胶囊（半透明胶囊体 + 霓虹描边 + 玻璃高光）+ 光环呼吸动画（随 timeSec 脉动）+ 类型图标发光；下落时附带正弦悬浮摇摆。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
 
@@ -227,7 +228,7 @@ function maybeDropPower(x, y) {
   if (Math.random() > 0.10) return;   // 10% 掉率
   const r = Math.random();
   const type = r < 0.30 ? 'multi' : r < 0.60 ? 'wide' : r < 0.85 ? 'pierce' : 'guns';
-  powerups.push({ x, y, vy: 150, type, w: 52, h: 28 });
+  powerups.push({ x, y, vy: 150, type, w: 52, h: 28, phase: Math.random() * Math.PI * 2 });  // v0.10：相位用于全息呼吸/悬浮摇摆
 }
 function applyPower(type) {
   powerSound();
@@ -362,6 +363,7 @@ function update(dt) {
   for (let i = powerups.length - 1; i >= 0; i--) {
     const p = powerups[i];
     p.y += p.vy * dt;
+    p.x += Math.sin(timeSec * 3 + (p.phase || 0)) * 28 * dt;  // v0.10 全息悬浮：下落时轻微左右摇摆
     const pw = paddleW();
     if (p.y + p.h / 2 >= paddle.y && p.y - p.h / 2 <= paddle.y + paddle.h &&
         p.x > paddle.x - p.w / 2 && p.x < paddle.x + pw + p.w / 2) {
@@ -639,13 +641,32 @@ function draw() {
     }
   }
 
+  // v0.10 掉落物全息化：悬浮全息胶囊 + 光环呼吸动画 + 类型图标发光
   for (const p of powerups) {
-    ctx.fillStyle = POWERS[p.type].color;
-    roundRect(p.x - p.w / 2, p.y - p.h / 2, p.w, p.h, 13); ctx.fill();
-    ctx.fillStyle = '#0b1020'; ctx.font = 'bold 16px sans-serif';
+    const pc = POWERS[p.type].color;
+    const br = .5 + .5 * Math.sin(timeSec * 3 + (p.phase || 0));  // 呼吸 0..1
+    // 光环呼吸：椭圆环半径/透明度/线宽随呼吸脉动
+    ctx.strokeStyle = hexA(pc, .3 + .45 * br);
+    ctx.lineWidth = 2 + 2 * br;
+    ctx.beginPath();
+    ctx.ellipse(p.x, p.y, p.w / 2 + 8 + 5 * br, p.h / 2 + 6 + 4 * br, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    // 胶囊体：半透明全息填充 + 发光霓虹描边
+    ctx.fillStyle = hexA(pc, .22);
+    roundRect(p.x - p.w / 2, p.y - p.h / 2, p.w, p.h, 14); ctx.fill();
+    ctx.shadowColor = pc; ctx.shadowBlur = 10 + 10 * br;
+    ctx.strokeStyle = pc; ctx.lineWidth = 2;
+    roundRect(p.x - p.w / 2, p.y - p.h / 2, p.w, p.h, 14); ctx.stroke();
+    ctx.shadowBlur = 0;
+    // 玻璃高光
+    ctx.fillStyle = 'rgba(255,255,255,.25)';
+    roundRect(p.x - p.w / 2 + 5, p.y - p.h / 2 + 3, p.w - 10, p.h / 2 - 5, 7); ctx.fill();
+    // 类型图标发光
+    ctx.shadowColor = pc; ctx.shadowBlur = 12;
+    ctx.fillStyle = '#ffffff'; ctx.font = 'bold 16px sans-serif';
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
     ctx.fillText(POWER_LABEL(p.type), p.x, p.y + 1);
-    ctx.textBaseline = 'alphabetic';
+    ctx.shadowBlur = 0; ctx.textBaseline = 'alphabetic';
   }
 
   // 子弹（科技感）：激光束——发光弹体 + 白色能量核心
@@ -714,7 +735,7 @@ function draw() {
   }
   // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
   ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('v0.9', W - 10, H - 34);
+  ctx.fillText('v0.10', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
