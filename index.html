@@ -41,6 +41,7 @@
        硬砖白边框 + 数字显示剩余血量——新概念 7：生命值与伤害系统。
    v0.9 移动砖块（难度多样化）：L3+ 部分 2 血砖横向巡逻（速度随关卡递增），撞边界反弹；小球/子弹/火球照常命中——新概念 8：动态障碍。L1 仍全 1 血温和开局。
    v0.10 掉落物全息化（未来科技风）：悬浮全息胶囊（半透明胶囊体 + 霓虹描边 + 玻璃高光）+ 光环呼吸动画（随 timeSec 脉动）+ 类型图标发光；下落时附带正弦悬浮摇摆。
+   v0.11 炸弹砖（难度多样化）：L4+ 稀有（L4 起 1 块、L5 起 2 块，从 1 血非移动砖里挑），警戒橙红 + 脉冲 "!" 警示；打碎后引爆 3×3 范围砖（连锁炸弹递归引爆，不伤球、不伤挡板），爆炸反馈=震屏 + 扩散冲击波环 + 火球粒子 + 低频轰鸣。L1–L3 无炸弹，温和开局不动。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
 
@@ -182,6 +183,7 @@ function buildBricks() {
   for (let r = 0; r < ROWS; r++)
     for (let c = 0; c < COLS; c++) {
       bricks.push({
+        row: r, col: c,
         x: GAP + c * (BRICK_W + GAP), y: TOP + r * (BRICK_H + GAP),
         w: BRICK_W, h: BRICK_H, color: ROW_COLORS[r % ROW_COLORS.length],
         alive: true, hp: 1, maxHp: 1,
@@ -209,6 +211,17 @@ function buildBricks() {
       b.mvx = Math.min(70 + 25 * (level - 3), 170);
       b.dir = Math.random() < 0.5 ? -1 : 1;
       b.minX = GAP; b.maxX = W - GAP - b.w;
+    }
+  }
+  // v0.11 炸弹砖：L4+ 稀有（L4 起 1 块，L5 起 2 块），从 1 血非移动砖里挑，
+  // 打碎后引爆 3×3 范围砖（不伤球、不伤挡板）。L1–L3 没有，温和开局不动。
+  if (level >= 4) {
+    const nBomb = level >= 5 ? 2 : 1;
+    const cands = bricks.filter(b => b.maxHp === 1 && !b.mvx && !b.bomb);
+    for (let i = 0; i < nBomb && cands.length; i++) {
+      const b = cands.splice(Math.floor(Math.random() * cands.length), 1)[0];
+      b.bomb = true;
+      b.color = '#ff5d3d';   // 炸弹砖专属警戒橙红，绘制时再加脉冲警告光晕
     }
   }
 }
@@ -285,6 +298,22 @@ function updateParticles(dt) {
   }
 }
 
+/* ---------- v0.11 炸弹爆炸冲击波环 ----------
+   跟粒子一样：数组存所有冲击波，每帧扩散 + 衰减 → 画圈 → 寿命到回收 */
+let blasts = [];   // {x, y, r, maxR, life, maxLife}
+function blast(x, y) {
+  blasts.push({ x, y, r: 10, maxR: (BRICK_W + GAP) * 2.1, life: 0.45, maxLife: 0.45 });
+}
+function updateBlasts(dt) {
+  for (let i = blasts.length - 1; i >= 0; i--) {
+    const b = blasts[i];
+    const k = dt / b.maxLife;
+    b.r += (b.maxR - 10) * k;   // 按寿命线性扩到 maxR
+    b.life -= dt;
+    if (b.life <= 0) blasts.splice(i, 1);
+  }
+}
+
 /* ---------- 屏幕震动 ---------- */
 let shakeT = 0;
 const SHAKE_DUR = 0.35;
@@ -327,7 +356,7 @@ function handleTap() {
 function restartAll() {
   score = 0; lives = 3; level = 1; combo = 0;
   paddle.x = W / 2 - paddle.w / 2; paddle.wideT = 0; paddle.gunsT = 0;
-  powerups = []; particles = []; bullets = [];
+  powerups = []; particles = []; bullets = []; blasts = [];
   buildBricks(); stickBallToPaddle();
   state = 'ready';
 }
@@ -375,6 +404,7 @@ function update(dt) {
   }
 
   updateParticles(dt);
+  updateBlasts(dt);   // v0.11：爆炸冲击波环扩散/衰减
   if (shakeT > 0) shakeT -= dt;
   if (gunFlashT > 0) gunFlashT -= dt;   // v0.8：炮口闪光衰减
 
@@ -462,11 +492,28 @@ function damageBrick(b, dmg) {
     combo++;
     score += 10 * level * comboMult();
     burst(cx, cy, b.color, 10);
+    if (b.bomb) explodeBomb(b);   // v0.11 炸弹砖：打碎后引爆 3×3
     maybeDropPower(cx, cy);
     beep(520 + Math.random() * 200, .05);
   } else {
     burst(cx, cy, '#ffffff', 4);       // 没碎：只溅几个小火花
     beep(300, .05, 'square', .08);     // 声音更闷，告诉你"这砖还硬着"
+  }
+}
+
+/* v0.11 炸弹引爆：3×3 范围砖直接炸掉（连锁炸弹递归引爆，alive 先置 false 防止死循环），
+   只炸砖——不碰球、不碰挡板。爆炸反馈：震屏 + 冲击波环 + 火球粒子 + 低频轰鸣 */
+function explodeBomb(b) {
+  const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+  shake();
+  blast(cx, cy);
+  burst(cx, cy, '#ff8c42', 18);
+  beep(120, .2, 'sawtooth', .15);
+  for (const nb of bricks) {
+    if (!nb.alive || nb === b) continue;
+    if (Math.abs(nb.row - b.row) <= 1 && Math.abs(nb.col - b.col) <= 1) {
+      damageBrick(nb, nb.hp);   // 范围内的砖（不管几血）直接清掉
+    }
   }
 }
 
@@ -494,7 +541,7 @@ function loseLife() {
 }
 function nextLevel() {
   level++; combo = 0;
-  powerups = []; bullets = [];
+  powerups = []; bullets = []; blasts = [];
   buildBricks();
   stickBallToPaddle();
   state = 'ready';
@@ -639,6 +686,18 @@ function draw() {
       ctx.moveTo(b.x + b.w - ax + 4, cy); ctx.lineTo(b.x + b.w - ax - 3.5, cy - 5.5);
       ctx.lineTo(b.x + b.w - ax - 3.5, cy + 5.5); ctx.closePath(); ctx.fill();
     }
+    if (b.bomb) {
+      // v0.11 炸弹砖：脉冲警戒光晕 + 白色 "!"，一眼看出"这块会炸"
+      const bp = .5 + .5 * Math.sin(timeSec * 7 + cx * .1);
+      ctx.shadowColor = '#ff5d3d'; ctx.shadowBlur = 10 + 14 * bp;
+      ctx.strokeStyle = `rgba(255,120,60,${.7 + .3 * bp})`; ctx.lineWidth = 2.5;
+      roundRect(b.x + 1.5, b.y + 1.5, b.w - 3, b.h - 3, 4); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = `rgba(255,255,255,${.85 + .15 * bp})`;
+      ctx.font = 'bold 17px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('!', cx, cy + 1);
+      ctx.textBaseline = 'alphabetic';
+    }
   }
 
   // v0.10 掉落物全息化：悬浮全息胶囊 + 光环呼吸动画 + 类型图标发光
@@ -711,6 +770,16 @@ function draw() {
     ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
   }
   ctx.globalAlpha = 1;
+  // v0.11 炸弹爆炸冲击波环：向外扩散 + 衰减消失
+  for (const bl of blasts) {
+    const k = 1 - bl.life / bl.maxLife;   // 0 → 1
+    ctx.shadowColor = '#ff8c42'; ctx.shadowBlur = 18;
+    ctx.strokeStyle = `rgba(255,140,66,${1 - k})`; ctx.lineWidth = 2 + 5 * (1 - k);
+    ctx.beginPath(); ctx.arc(bl.x, bl.y, bl.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = `rgba(255,220,150,${.3 * (1 - k)})`;
+    ctx.beginPath(); ctx.arc(bl.x, bl.y, bl.r, 0, Math.PI * 2); ctx.fill();
+  }
   ctx.restore();
 
   // HUD（全部走双语字典）
@@ -735,7 +804,7 @@ function draw() {
   }
   // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
   ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('v0.10', W - 10, H - 34);
+  ctx.fillText('v0.11', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
