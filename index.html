@@ -43,6 +43,7 @@
    v0.10 掉落物全息化（未来科技风）：悬浮全息胶囊（半透明胶囊体 + 霓虹描边 + 玻璃高光）+ 光环呼吸动画（随 timeSec 脉动）+ 类型图标发光；下落时附带正弦悬浮摇摆。
    v0.11 炸弹砖（难度多样化）：L4+ 稀有（L4 起 1 块、L5 起 2 块，从 1 血非移动砖里挑），警戒橙红 + 脉冲 "!" 警示；打碎后引爆 3×3 范围砖（连锁炸弹递归引爆，不伤球、不伤挡板），爆炸反馈=震屏 + 扩散冲击波环 + 火球粒子 + 低频轰鸣。L1–L3 无炸弹，温和开局不动。
    v0.12 砖块碎裂特效（未来科技风）：砖碎时不再是普通粒子 burst——砖体先切成 5 条横向碎片，带随机错位 + 抖动闪烁做 glitch 消散，同时扩出一圈砖块本色的能量冲击波环；未打碎的硬砖仍只溅小火花。
+   v0.13 金砖（难度多样化）：L2+ 稀有金砖（L2 1 块、L3+ 2 块，从 1 血非移动非炸弹砖里挑），金色霓虹 + ★ 标记；打碎必掉道具（不受 10% 掉率和同屏 3 个上限限制）。L1 无金砖，温和开局不动。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
 
@@ -225,6 +226,17 @@ function buildBricks() {
       b.color = '#ff5d3d';   // 炸弹砖专属警戒橙红，绘制时再加脉冲警告光晕
     }
   }
+  // v0.13 金砖：L2+ 稀有（L2 1 块、L3+ 2 块），从 1 血非移动非炸弹砖里挑，
+  // 打碎必掉道具。L1 没有，温和开局不动；不抢炸弹/移动砖的名额。
+  if (level >= 2) {
+    const nGold = level >= 3 ? 2 : 1;
+    const cands = bricks.filter(b => b.maxHp === 1 && !b.mvx && !b.bomb && !b.gold);
+    for (let i = 0; i < nGold && cands.length; i++) {
+      const b = cands.splice(Math.floor(Math.random() * cands.length), 1)[0];
+      b.gold = true;
+      b.color = '#ffd700';   // 金砖专属金色，绘制时再加 ★ 标记
+    }
+  }
 }
 
 /* ---------- 概念 3：掉落物系统 ---------- */
@@ -237,12 +249,16 @@ const POWERS = {
 const POWER_LABEL = p =>
   p === 'multi' ? '×3' : { wide: t().powWide, pierce: t().powPierce, guns: t().powGuns }[p];
 let powerups = [];
-function maybeDropPower(x, y) {
-  if (powerups.length >= 3) return;   // 同屏最多 3 个掉落物，防止刷屏
-  if (Math.random() > 0.10) return;   // 10% 掉率
+// v0.13：金砖必掉——直接生成一个道具，不走掉率和同屏上限
+function dropPower(x, y) {
   const r = Math.random();
   const type = r < 0.30 ? 'multi' : r < 0.60 ? 'wide' : r < 0.85 ? 'pierce' : 'guns';
   powerups.push({ x, y, vy: 150, type, w: 52, h: 28, phase: Math.random() * Math.PI * 2 });  // v0.10：相位用于全息呼吸/悬浮摇摆
+}
+function maybeDropPower(x, y) {
+  if (powerups.length >= 3) return;   // 同屏最多 3 个掉落物，防止刷屏
+  if (Math.random() > 0.10) return;   // 10% 掉率
+  dropPower(x, y);
 }
 function applyPower(type) {
   powerSound();
@@ -524,7 +540,8 @@ function damageBrick(b, dmg) {
     shatter(b.x, b.y, b.w, b.h, b.color);              // v0.12：glitch 消散碎片
     blast(cx, cy, b.color, (BRICK_W + GAP) * 0.9);     // v0.12：砖块本色小冲击波环
     if (b.bomb) explodeBomb(b);   // v0.11 炸弹砖：打碎后引爆 3×3
-    maybeDropPower(cx, cy);
+    if (b.gold) dropPower(cx, cy);   // v0.13 金砖：必掉道具
+    else maybeDropPower(cx, cy);
     beep(520 + Math.random() * 200, .05);
   } else {
     burst(cx, cy, '#ffffff', 4);       // 没碎：只溅几个小火花
@@ -729,6 +746,18 @@ function draw() {
       ctx.fillText('!', cx, cy + 1);
       ctx.textBaseline = 'alphabetic';
     }
+    if (b.gold) {
+      // v0.13 金砖：金色光晕 + ★，一眼看出"这块必掉道具"
+      const gp = .5 + .5 * Math.sin(timeSec * 5 + cx * .1);
+      ctx.shadowColor = '#ffd700'; ctx.shadowBlur = 10 + 10 * gp;
+      ctx.strokeStyle = `rgba(255,215,0,${.7 + .3 * gp})`; ctx.lineWidth = 2;
+      roundRect(b.x + 1.5, b.y + 1.5, b.w - 3, b.h - 3, 4); ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = '#fff7cc';
+      ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('★', cx, cy + 1);
+      ctx.textBaseline = 'alphabetic';
+    }
   }
 
   // v0.10 掉落物全息化：悬浮全息胶囊 + 光环呼吸动画 + 类型图标发光
@@ -848,7 +877,7 @@ function draw() {
   }
   // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
   ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('v0.12', W - 10, H - 34);
+  ctx.fillText('v0.13', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
