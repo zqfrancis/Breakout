@@ -44,6 +44,7 @@
    v0.11 炸弹砖（难度多样化）：L4+ 稀有（L4 起 1 块、L5 起 2 块，从 1 血非移动砖里挑），警戒橙红 + 脉冲 "!" 警示；打碎后引爆 3×3 范围砖（连锁炸弹递归引爆，不伤球、不伤挡板），爆炸反馈=震屏 + 扩散冲击波环 + 火球粒子 + 低频轰鸣。L1–L3 无炸弹，温和开局不动。
    v0.12 砖块碎裂特效（未来科技风）：砖碎时不再是普通粒子 burst——砖体先切成 5 条横向碎片，带随机错位 + 抖动闪烁做 glitch 消散，同时扩出一圈砖块本色的能量冲击波环；未打碎的硬砖仍只溅小火花。
    v0.13 金砖（难度多样化）：L2+ 稀有金砖（L2 1 块、L3+ 2 块，从 1 血非移动非炸弹砖里挑），金色霓虹 + ★ 标记；打碎必掉道具（不受 10% 掉率和同屏 3 个上限限制）。L1 无金砖，温和开局不动。
+   v0.14 关卡过渡（未来科技风）：清关后不再硬切背景——1.2 秒曲速跃迁转场（中心放射速度线 + 渐隐）+ 新关卡名全息展示（霓虹面板 + 进度条），转场期间点击/空格不发球，转场结束才回到待发球状态。
    操作：鼠标移动 / 手指拖动 / ← → 键移动挡板，点击或空格发球
    ========================================================================== */
 
@@ -68,6 +69,7 @@ const T = {
     playAgain: '点击 / 空格 再来一局',
     powWide: '加长', powPierce: '火球', powGuns: '双枪',
     fxWide: '▬', fxPierce: '🔥', fxGuns: '双枪',
+    warp: '曲速跃迁',
   },
   en: {
     title: 'Breakout', lesson: 'Game Dev Lesson 1',
@@ -81,6 +83,7 @@ const T = {
     playAgain: 'Tap / Space to play again',
     powWide: 'WIDE', powPierce: 'FIRE', powGuns: 'GUNS',
     fxWide: '▬', fxPierce: '🔥', fxGuns: 'GUNS',
+    warp: 'WARP JUMP',
   },
 };
 let lang = localStorage.getItem('breakout-lang') || 'zh';
@@ -395,11 +398,12 @@ canvas.addEventListener('pointerdown', e => {
   handleTap();
 });
 function handleTap() {
+  if (warpT > 0) return;   // v0.14：曲速转场期间不发球，等转场结束
   if (state === 'ready') launchBall();
   else if (state === 'gameover') restartAll();
 }
 function restartAll() {
-  score = 0; lives = 3; level = 1; combo = 0;
+  score = 0; lives = 3; level = 1; combo = 0; warpT = 0;   // v0.14：重开不残留转场
   paddle.x = W / 2 - paddle.w / 2; paddle.wideT = 0; paddle.gunsT = 0;
   powerups = []; particles = []; bullets = []; blasts = []; shatters = [];
   buildBricks(); stickBallToPaddle();
@@ -453,6 +457,7 @@ function update(dt) {
   updateShatters(dt); // v0.12：碎裂碎片漂移/淡出
   if (shakeT > 0) shakeT -= dt;
   if (gunFlashT > 0) gunFlashT -= dt;   // v0.8：炮口闪光衰减
+  if (warpT > 0) warpT = Math.max(0, warpT - dt);   // v0.14：转场计时（ready 下也走）
 
   if (state === 'ready') { if (balls[0]) placeBallOnPaddle(balls[0]); return; }
   if (state !== 'playing') return;
@@ -587,13 +592,65 @@ function loseLife() {
     stickBallToPaddle();
   }
 }
+/* ---------- v0.14 关卡过渡：曲速跃迁转场 ----------
+   清关后不硬切：新关卡砖块先布好、状态回到 ready，但 warpT 在 1.2 秒内
+   从 WARP_DUR 衰减到 0，drawWarp 在此期间盖一层速度线 + 全息关卡名面板；
+   转场期间 handleTap 不发球，转场结束画面自然回到待发球状态。 */
+const WARP_DUR = 1.2;
+let warpT = 0;
 function nextLevel() {
   level++; combo = 0;
   powerups = []; bullets = []; blasts = []; shatters = [];
   buildBricks();
   stickBallToPaddle();
   state = 'ready';
-  beep(660, .1); setTimeout(() => beep(880, .12), 110);
+  warpT = WARP_DUR;
+  beep(220, .12, 'sawtooth', .1); setTimeout(() => beep(440, .12, 'sawtooth', .1), 120);
+  setTimeout(() => beep(880, .12), 240);
+}
+function drawWarp() {
+  if (warpT <= 0) return;
+  const k = 1 - warpT / WARP_DUR;   // 0 → 1：转场进度
+  const env = k < 0.7 ? 1 : 1 - (k - 0.7) / 0.3;   // 后 30% 渐隐
+  ctx.save();
+  ctx.fillStyle = `rgba(5,8,20,${0.45 * env})`;
+  ctx.fillRect(0, 0, W, H);
+  // 曲速速度线：从画面中心放射，角度固定（金角步进）保证每帧稳定不闪烁，
+  // 线长随进度拉长，营造"被吸入曲速"的加速感
+  const cx = W / 2, cy = H / 2;
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 56; i++) {
+    const a = i * 2.39996;
+    const r1 = 30 + k * 120 + (i % 5) * 12;
+    const r2 = r1 + 40 + k * 260;
+    const bright = i % 4 === 0;
+    ctx.strokeStyle = bright ? `rgba(255,255,255,${0.85 * env})` : `rgba(125,249,255,${0.55 * env})`;
+    ctx.lineWidth = bright ? 2.5 : 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+    ctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
+    ctx.stroke();
+  }
+  // 全息关卡名面板：半透明暗底 + 呼吸霓虹边框 + 曲速标签 + 进度条
+  const pw = 300, ph = 118, px = cx - pw / 2, py = cy - ph / 2;
+  const br = .5 + .5 * Math.sin(timeSec * 6);
+  ctx.fillStyle = 'rgba(8,14,32,.82)';
+  roundRect(px, py, pw, ph, 14); ctx.fill();
+  ctx.shadowColor = '#22d3ee'; ctx.shadowBlur = 16 + 10 * br;
+  ctx.strokeStyle = `rgba(34,211,238,${0.65 + 0.35 * br})`; ctx.lineWidth = 2;
+  roundRect(px, py, pw, ph, 14); ctx.stroke();
+  ctx.shadowBlur = 0;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#22d3ee'; ctx.font = 'bold 16px sans-serif';
+  ctx.fillText(t().warp, cx, py + 26);
+  ctx.fillStyle = '#ffffff'; ctx.font = 'bold 36px sans-serif';
+  ctx.fillText(t().level(level), cx, py + 66);
+  ctx.fillStyle = 'rgba(255,255,255,.18)';
+  roundRect(px + 30, py + 94, pw - 60, 6, 3); ctx.fill();
+  ctx.fillStyle = '#22d3ee';
+  roundRect(px + 30, py + 94, (pw - 60) * k, 6, 3); ctx.fill();
+  ctx.textBaseline = 'alphabetic';
+  ctx.restore();
 }
 
 /* ---------- 绘制 ---------- */
@@ -877,7 +934,7 @@ function draw() {
   }
   // 版本号：截图一眼看出跑的是哪个版本（排 CDN 缓存问题用得上）
   ctx.fillStyle = 'rgba(139,152,184,.55)'; ctx.font = '13px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText('v0.13', W - 10, H - 34);
+  ctx.fillText('v0.14', W - 10, H - 34);
 
   // 语言切换按钮（画进 canvas，和 HUD 同一坐标系，不会互相遮挡）
   ctx.fillStyle = 'rgba(10,15,35,.7)';
@@ -908,6 +965,9 @@ function draw() {
       ctx.fillText(t().playAgain, W / 2, H / 2 + 48);
     }
   }
+
+  // v0.14：曲速转场盖在最上层（含待发球遮罩之上），warpT=0 时内部直接返回
+  drawWarp();
 }
 
 /* ---------- 启动 ---------- */
